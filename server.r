@@ -1,21 +1,19 @@
-# library(datasets)
 library(dplyr)
 library(rdrop2)
 library(EpiEstim)
 library(forecast)
 library(ggplot2)
-
-# install.packages("ggiraph")
 library(ggiraph)
-
 library(imputeTS)
 library(lubridate)
+library(openxlsx)
 library(RColorBrewer)
 library(shiny)
 library(smooth)
 library(sf)
+library(waiter)
 library(WaveletComp) # http://www.hs-stat.com/projects/WaveletComp/WaveletComp_guided_tour.pdf
-library(openxlsx)
+
 
 token <<- readRDS("droptoken.rds")
 
@@ -204,7 +202,6 @@ total_SIR <- function() {
       aux_ers_df_sim[which.max(aux_ers_df_sim$Infectados), ]
     ers_aux_df_sim <<- rbind(ers_aux_df_sim, aux_ers_df_sim)
   }
-  ers_aux_df_sim
 }
 
 
@@ -216,8 +213,17 @@ total_SIR()
 
 # Inicia o servidor.
 shinyServer(function(input, output) {
-  
   waiter_hide()
+  w <- Waiter$new(id = c('rtPlot', 'mm7rtPlot',
+                         'baggedForecastPlot',
+                         'arimaForecastPlot',
+                         'decomposicaoPlot',
+                         'arimaTabela',
+                         'vaPlot',
+                         'waveletPlot',
+                         'fuzzyPlot'),
+                  html = spin_gauge(),
+                  color = 'white')
   
   getDataset <- reactive({
     return(ts_infectados(input$aglomerado, input$varepi))
@@ -245,6 +251,7 @@ shinyServer(function(input, output) {
   })
   
   output$rtPlot <- renderPlot({
+    w$show()
     nt <- showNotification("Processando número básico de reprodução.",
                            duration = NA,
                            closeButton = FALSE,
@@ -266,6 +273,7 @@ shinyServer(function(input, output) {
   })
   
   output$mm7rtPlot <- renderPlot({
+    w$show()
     nt <- showNotification("Processando média movel do número básico de reprodução.",
                            duration = 1,
                            closeButton = FALSE,
@@ -296,6 +304,7 @@ shinyServer(function(input, output) {
   })
   
   output$decomposicaoPlot <- renderPlot({
+    w$show()
     nt <- showNotification("Processando decomposição da série.",
                            duration = 1,
                            closeButton = FALSE,
@@ -307,6 +316,7 @@ shinyServer(function(input, output) {
   })
 
   output$arimaTabela <- renderDataTable({
+    w$show()
     nt <- showNotification("Processando previsões do ARIMA.",
                            duration = 3,
                            closeButton = FALSE,
@@ -329,6 +339,7 @@ shinyServer(function(input, output) {
   )
 
   output$arimaForecastPlot <- renderPlot({
+    w$show()
     nt <- showNotification("Processando gráfico do ARIMA.",
                            duration = 3,
                            closeButton = FALSE,
@@ -341,6 +352,8 @@ shinyServer(function(input, output) {
   })
   
   output$baggedForecastPlot <- renderPlot({
+    w$show()
+    
     nt <- showNotification("Processando gráfico do Bagged.",
                            duration = 3,
                            closeButton = FALSE,
@@ -372,6 +385,7 @@ shinyServer(function(input, output) {
   )
   
   output$vaPlot <- renderPlot({
+    w$show()
     nt <- showNotification("Processando média móvel da velocidade de avanço.",
                            duration = 1,
                            closeButton = FALSE,
@@ -386,6 +400,7 @@ shinyServer(function(input, output) {
   })
   
   output$waveletPlot <- renderPlot({
+    w$show()
     nt <- showNotification("Processando Wavelet.",
                            duration = NA,
                            closeButton = FALSE,
@@ -402,21 +417,23 @@ shinyServer(function(input, output) {
     wt.image(my.w, color.key = "quantile", n.levels = 250,
              legend.params = list(lab = "wavelet power levels", mar = 4.7))
     removeNotification(nt)
-  })
+  }, height = 700, width = 970)
   
-  output$fuzzyPlot <- renderPlot({
+  output$fuzzyPlot <- renderGirafe({
+    w$show()
     nt <- showNotification("Processando mapa do risco por lógica fuzzy.",
                            duration = 3,
                            closeButton = FALSE,
                            type= 'message')
     aux_gg <- ggplot(municipios) +
-      geom_sf(aes(fill = risco)) +
+      geom_sf_interactive(aes(fill = risco, tooltip = Nome), show.legend = "point") +
       theme_minimal() + 
       scale_fill_gradientn(colours=rev(brewer.pal(11, "Spectral")), 
                            na.value = "#ffffff",
                            limits = c(0, 100))
-    aux_gg
-  }, height = 800, width = 800)  
+    girafe(ggobj = aux_gg, 
+           options = list(opts_selection(type = "single", only_shiny = FALSE)))
+  })   
   
   output$fuzzyTabela <- renderDataTable({
     nt <- showNotification("Processando tabela risco por lógica fuzzy.",

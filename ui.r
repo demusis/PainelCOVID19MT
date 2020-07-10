@@ -1,7 +1,8 @@
-library(waiter)
+library(ggiraph)
 library(shiny)
 library(shinythemes)
 library(stringi)
+library(waiter)
 
 # setwd("D:/OneDrive/Shiny")
 
@@ -22,7 +23,7 @@ shinyUI(
             use_waiter(), # dependencies
             waiter_show_on_load(tagList(spin_heartbeat(),
                                         br(), br(), "Carregando..."
-                               )
+                                       )
             ),         
             
   tittle =  'Gabinete Militar: Análise das séries temporais da COVID-19 do Estado de Mato Grosso',
@@ -81,7 +82,7 @@ shinyUI(
                                               plotOutput("rtPlot")),
       tabPanel("Velocidade de avanço", plotOutput("vaPlot")),
       tabPanel("Wavelet", plotOutput("waveletPlot")),
-      tabPanel("Mapa de risco (lógica nebulosa)", plotOutput("fuzzyPlot",  width = '800px', 
+      tabPanel("Mapa de risco (lógica nebulosa)", girafeOutput("fuzzyPlot",  width = '800px', 
                                                                            height = '800px'),
                                                   dataTableOutput('fuzzyTabela'),
                                                   downloadButton('dwArquivo'),),
