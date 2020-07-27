@@ -70,6 +70,9 @@ shinyUI(
   mainPanel(
     h3(textOutput("caption")),
     tabsetPanel(
+      tabPanel("Média móvel", plotOutput("mmPlot"),
+                              dataTableOutput('mmTabela'),
+                              downloadButton('mmArquivo')),
       tabPanel("Bagged", plotOutput("baggedForecastPlot"),
                          dataTableOutput('baggedTabela'),
                          downloadButton('baggedArquivo')), 

@@ -1,3 +1,4 @@
+library(baytrends)
 library(dplyr)
 library(rdrop2)
 library(EpiEstim)
@@ -51,7 +52,7 @@ carregaDados <- function() {
     aux_dados$Infectados + aux_dados$Recuperados + aux_dados$Obitos
   
   # Apaga eventuais celulas vazias.
-  aux_dados <- aux_dados[!is.na(aux_dados[, 'Infectados']),]
+  # mt_dados <- aux_dados[!is.na(aux_dados[, 'Infectados']),]
   mt_dados <- aux_dados
 
   # Guarda data do último registro
@@ -63,7 +64,7 @@ carregaDados <- function() {
   mt_total_dados <-
     aggregate(cbind(Infectados, Recuperados, Obitos, Total) ~ Dia_Juliano,
               mt_dados,
-              sum)
+              sum, na.action=na.pass)
   mt_total_dados$Municipio <- 'Mato Grosso'
   
   # Adiciona o Mato Grosso no rol.
@@ -99,6 +100,11 @@ ts_infectados <- function(aux_nivel, aux_varepi) {
           all.x = TRUE)
   todos_dados$Municipio <- aux_nivel
   
+  todos_dados$Infectados <- fillMissing(todos_dados$Infectados, span=2, max.fill = 90)
+  todos_dados$Recuperados <- fillMissing(todos_dados$Recuperados, span=2, max.fill = 90)
+  todos_dados$Obitos <- fillMissing(todos_dados$Obitos, span=2, max.fill = 90)
+  todos_dados$Total <- fillMissing(todos_dados$Total, span=2, max.fill = 90)
+  
   # Seleciona variaveis de analise.
   # dados <- todos_dados[, c('Dia_Juliano', 'Total')]
 
@@ -108,9 +114,10 @@ ts_infectados <- function(aux_nivel, aux_varepi) {
        start = todos_dados[1, 'Dia_Juliano'],
        frequency = 1)
   
-  # Preenchimento de falhas
-  ts_aux <-
-    na_kalman(ts_aux, model = "StructTS", smooth = TRUE)
+  # Preenchimento de falhas mais rigoroso.
+  # try(ts_aux <-
+  #   na_kalman(ts_aux, model = "StructTS", smooth = TRUE))
+
   return(ts_aux)
 }
 
@@ -250,20 +257,15 @@ shinyServer(function(input, output) {
     paste('Último registro: ', aux_dh)
   })
   
-  output$rtPlot <- renderPlot({
+  output$mmPlot <- renderPlot({
     w$show()
-    nt <- showNotification("Processando número básico de reprodução.",
+    nt <- showNotification("Processando médias móveis (7 dias).",
                            duration = NA,
                            closeButton = FALSE,
                            type= 'message')
-    dados_MT <- as.numeric(diff(obtemTotal())) 
-    res <- estimate_R(dados_MT, method = "parametric_si",
-                      config = make_config(list(
-                        mean_si = 3.96, std_si = 4.75
-                      )))
-    r30 <- tail(res$R$'Median(R)', 30)
-    mm_r30 <- sma(
-      r30,
+    dados <- tail(diff(getDataset()), 30)
+    mm <- sma(
+      dados,
       order = 7,
       h = 1,
       interval = 'none',
@@ -272,19 +274,70 @@ shinyServer(function(input, output) {
     removeNotification(req(nt))
   })
   
-  output$mm7rtPlot <- renderPlot({
-    w$show()
-    nt <- showNotification("Processando média movel do número básico de reprodução.",
-                           duration = 1,
+  output$mmTabela <- renderDataTable({
+    nt <- showNotification("Processando tabelas das médias móveis.",
+                           duration = 3,
                            closeButton = FALSE,
                            type= 'message')
-    dados_MT <- as.numeric(diff(obtemTotal())) 
-    res <- estimate_R(dados_MT, method = "parametric_si",
-                      config = make_config(list(
-                        mean_si = 3.96, std_si = 4.75
-                      )))
-    plot(res)
-
+    dados <- tail(diff(getDataset()), 30)
+    mm <<- sma(
+      dados,
+      order = 7,
+      h = 1,
+      interval = 'none',
+      silent = "all"
+    )
+    aux_tab <- cbind(mm$y, mm$fitted)
+    aux_tab <- data.frame(aux_tab) 
+    colnames(aux_tab) <- c('Indivíduos novos', 'Média móvel')
+    aux_tab
+  })
+  
+  output$mmArquivo <- downloadHandler(filename = 'mm.xlsx', 
+                                      content = function(arqu){
+                                         write.xlsx(mm, arqu)
+                                      }
+  )
+  
+  
+  output$rtPlot <- renderPlot({
+    w$show()
+    nt <- showNotification("Processando número básico de reprodução.",
+                           duration = NA,
+                           closeButton = FALSE,
+                           type= 'message')
+    dados_MT <- as.numeric(diff(obtemTotal()))
+    erro_rt <- try({
+      res <- estimate_R(dados_MT, method = "parametric_si",
+                        config = make_config(list(mean_si = 3.96, std_si = 4.75)))
+      r30 <- tail(res$R$'Median(R)', 30)
+      mm_r30 <- sma(
+        r30,
+        order = 7,
+        h = 1,
+        interval = 'none',
+        silent = "none"
+      )
+      
+    })
+    removeNotification(req(nt))
+  })
+  
+  output$mm7rtPlot <- renderPlot({
+    w$show()
+    nt <-
+      showNotification(
+        "Processando média movel do número básico de reprodução.",
+        duration = 1,
+        closeButton = FALSE,
+        type = 'message'
+      )
+    dados_MT <- as.numeric(diff(obtemTotal()))
+    erro_rt <- try({
+      res <- estimate_R(dados_MT, method = "parametric_si",
+                        config = make_config(list(mean_si = 3.96, std_si = 4.75)))
+      plot(res)
+    })
   })
   
   output$rtTexto <- renderText({
@@ -292,15 +345,21 @@ shinyServer(function(input, output) {
                            duration = 1,
                            closeButton = FALSE,
                            type= 'message')
-    dados_MT <- as.numeric(diff(obtemTotal())) 
-    res <- estimate_R(dados_MT, method = "parametric_si",
-                      config = make_config(list(
-                        mean_si = 3.96, std_si = 4.75
-                      )))
-    r_025 <- round(tail(res$R$'Quantile.0.025(R)', 1), 3)
-    r_975 <- round(tail(res$R$'Quantile.0.975(R)', 1), 3)
-    r_500 <- round(tail(res$R$'Median(R)', 1), 3)
-    paste('Intervalo de confiança da mediana (95%): [', r_025, ',', r_500, ',', r_975, '].')
+    dados_MT <- as.numeric(diff(obtemTotal()))
+    erro_rt <- try({
+      res <- estimate_R(dados_MT, method = "parametric_si",
+                        config = make_config(list(mean_si = 3.96, std_si = 4.75)))
+      r_025 <- round(tail(res$R$'Quantile.0.025(R)', 1), 3)
+      r_975 <- round(tail(res$R$'Quantile.0.975(R)', 1), 3)
+      r_500 <- round(tail(res$R$'Median(R)', 1), 3)
+      paste('Intervalo de confiança da mediana (95%): [',
+            r_025,
+            ',',
+            r_500,
+            ',',
+            r_975,
+            '].')
+    })
   })
   
   output$decomposicaoPlot <- renderPlot({
@@ -309,10 +368,12 @@ shinyServer(function(input, output) {
                            duration = 1,
                            closeButton = FALSE,
                            type= 'message')
-    ts_aux <-
-      ts(getDataset(), frequency = 7)
-    f <- decompose(ts_aux)
-    plot(f)
+    try({
+      ts_aux <-
+        ts(getDataset(), frequency = 7)
+      f <- decompose(ts_aux)
+      plot(f)
+    })
   })
 
   output$arimaTabela <- renderDataTable({
@@ -320,22 +381,24 @@ shinyServer(function(input, output) {
     nt <- showNotification("Processando previsões do ARIMA.",
                            duration = 3,
                            closeButton = FALSE,
-                           type= 'message')
-    l <- BoxCox.lambda(getDataset())
-    fit <- auto.arima(getDataset(), lambda=l)
-    f <- forecast(fit, h=input$ahead)
-    df_f <- data.frame(f)
-    df_f <- df_f[, c(1, 4, 5)] 
-    colnames(df_f) <-
-      c('Previsao', 'Limite inferior (95%)', 'Limite superior (95%)')
-    df_arima <<- round(df_f, 2)
-    df_arima
+                           type = 'message')
+    try({
+      l <- BoxCox.lambda(getDataset())
+      fit <- auto.arima(getDataset(), lambda = l)
+      f <- forecast(fit, h = input$ahead)
+      df_f <- data.frame(f)
+      df_f <- df_f[, c(1, 4, 5)]
+      colnames(df_f) <-
+        c('Previsao', 'Limite inferior (95%)', 'Limite superior (95%)')
+      df_arima <<- round(df_f, 2)
+      df_arima
+    })
   })
   
   output$arimaArquivo <- downloadHandler(filename = 'arima_estimativas.xlsx', 
                                          content = function(arqu){
-                                            write.xlsx(df_arima, arqu)
-                                          }
+                                           write.xlsx(df_arima, arqu)
+                                         }
   )
 
   output$arimaForecastPlot <- renderPlot({
@@ -344,11 +407,12 @@ shinyServer(function(input, output) {
                            duration = 3,
                            closeButton = FALSE,
                            type= 'message')
-    l <- BoxCox.lambda(getDataset())
-    fit <- auto.arima(getDataset(), lambda=l)
-    f <- forecast(fit, h=input$ahead)
-    plot(forecast(f))
-    
+    try({
+      l <- BoxCox.lambda(getDataset())
+      fit <- auto.arima(getDataset(), lambda = l)
+      f <- forecast(fit, h = input$ahead)
+      plot(forecast(f))
+    })
   })
   
   output$baggedForecastPlot <- renderPlot({
@@ -358,9 +422,11 @@ shinyServer(function(input, output) {
                            duration = 3,
                            closeButton = FALSE,
                            type= 'message')
-    l <- BoxCox.lambda(getDataset())
-    fit <- baggedModel(getDataset(), lambda=l)
-    plot(forecast(fit, h=input$ahead))
+    try({
+      l <- BoxCox.lambda(getDataset())
+      fit <- baggedModel(getDataset(), lambda = l)
+      plot(forecast(fit, h = input$ahead))
+    })
   })
   
   output$baggedTabela <- renderDataTable({
@@ -368,14 +434,16 @@ shinyServer(function(input, output) {
                            duration = 3,
                            closeButton = FALSE,
                            type= 'message')
-    l <- BoxCox.lambda(getDataset())
-    fit <- baggedModel(getDataset(), lambda=l)
-    f <- forecast(fit, h=input$ahead)
-    df_f <- data.frame(f)
-    colnames(df_f) <-
-      c('Previsao', 'Limite inferior (95%)', 'Limite superior (95%)')
-    df_bagged <<- round(df_f, 2)
-    df_bagged
+    try({
+      l <- BoxCox.lambda(getDataset())
+      fit <- baggedModel(getDataset(), lambda = l)
+      f <- forecast(fit, h = input$ahead)
+      df_f <- data.frame(f)
+      colnames(df_f) <-
+        c('Previsao', 'Limite inferior (95%)', 'Limite superior (95%)')
+      df_bagged <<- round(df_f, 2)
+      df_bagged
+    })
   })
   
   output$baggedArquivo <- downloadHandler(filename = 'bagged_estimativas.xlsx', 
@@ -390,13 +458,16 @@ shinyServer(function(input, output) {
                            duration = 1,
                            closeButton = FALSE,
                            type= 'message')
-    ts_in1s <- va(getDataset())
-    modelo_in1s <- sma(tail(ts_in1s, 14),
-                       order = 7,
-                       h = 1,
-                       interval = 'none',
-                       silent = 'none'
-    )    
+    try({
+      ts_in1s <- va(getDataset())
+      modelo_in1s <- sma(
+        tail(ts_in1s, 14),
+        order = 7,
+        h = 1,
+        interval = 'none',
+        silent = 'none'
+      )
+    })
   })
   
   output$waveletPlot <- renderPlot({
@@ -407,15 +478,26 @@ shinyServer(function(input, output) {
                            type= 'message')
     df_ts <- data.frame(getDataset())
     colnames(df_ts) <- 'x'
-    my.w <- analyze.wavelet(df_ts, "x",
-                            loess.span = 0,
-                            dt = 1, dj = 1/100,
-                            lowerPeriod = 7,
-                            upperPeriod = 91,
-                            make.pval = TRUE, n.sim = 50)
-    
-    wt.image(my.w, color.key = "quantile", n.levels = 250,
-             legend.params = list(lab = "wavelet power levels", mar = 4.7))
+    try({
+      my.w <- analyze.wavelet(
+        df_ts,
+        "x",
+        loess.span = 0,
+        dt = 1,
+        dj = 1 / 100,
+        lowerPeriod = 7,
+        upperPeriod = 91,
+        make.pval = TRUE,
+        n.sim = 50
+      )
+      
+      wt.image(
+        my.w,
+        color.key = "quantile",
+        n.levels = 250,
+        legend.params = list(lab = "wavelet power levels", mar = 4.7)
+      )
+    })
     removeNotification(nt)
   }, height = 700, width = 970)
   
